@@ -15,7 +15,7 @@
 # Nastaveni skriptu
 
 # nazev skriptu
-WANA=./wana
+WANA=./wana.sh
 
 # adresar s log soubory. Pokud jsou logy v adresari, pouzij napr ./logs/
 LOGS_DIR=./

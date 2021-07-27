@@ -1,369 +1,271 @@
-####
-## Project name:    wana
-##  Description:    Web log analyzer
-##                  Program is written in shell script
-##      Subject:    Operating Systems
-##       Author:    Peter Koprda
-##       School:    Faculty of Information Technology, Brno University of Technology
-##         Date:    March 2019
-####
-
 #!/bin/sh
 
 POSIXLY_CORRECT=yes
 
-## This function prints out source IP addresses
-list_ip()
-{
-    while [ "$#" -gt "0" ]
+usage(){
+cat << EOF
+Usage: ./wana.sh [FILTER] [COMMAND] [LOG [LOG2 [...]]]
+View and filter web log files.
+
+Filters:
+    -a DATETIME         show queries after this date; 
+                        DATETIME must be in format YYYY-MM-DD HH:MM:SS
+    -b DATETIME         show queries before this date;
+                        DATETIME must be in format YYYY-MM-DD HH:MM:SS
+    -ip IPADDR          show queries from this source address IPADDR;
+                        IPADDR must be IPv4 or IPv6
+    -uri URI            show queries of requests on the webpage URI;
+                        URI is standard regular expression
+
+Commands:
+    list-ip             list of source IP adresses
+    list-hosts          list of source domain names
+    list-uri            list of destination sources (URI)
+    hist-ip             create histogram of source IPs
+    hist-load           create histogram of load
+
+Other options:
+    -h, --help          display this help and exit
+
+EOF
+}
+
+get_list_ip(){
+    echo "$1" | awk '{print $1}' | sort --unique
+}
+
+get_list_hosts(){
+    IP_ADDRS=$(get_list_ip "$1" | sed 's/\n/ /g')
+    for ip in $IP_ADDRS
     do
-        echo "$1" | grep -o -E  '^([A-Fa-f0-9]{0,4}\:){1,7}[A-Fa-f0-9]{0,4}' | sort --unique      #IPv6
-        echo "$1" | grep -o -E  '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | sort --unique  #IPv4
-        shift
-    done
-}
-
-## This function prints out source domain names
-list_hosts()
-{        
-    while [ "$#" -gt "0" ]
-    do
-        ips="$(echo "$1" | awk -F- '{print $1}' | sort --unique )"
-        for i in $ips
-        do
-            hosts=$( host "$i" | awk -F" " '{print $NF}' )
-            if [ "$hosts" = "3(NXDOMAIN)" ] 2>dev>null; then
-                echo "$i"
-            elif [ "$hosts" = "2(SERFAIL)" ] 2>dev>null; then
-                echo "$i"
-            else
-                echo "$hosts"
-            fi
-        done
-        shift
-    done
-}
-
-## This function prints out list of uniform resource identifier (URI)
-list_uri()
-{
-    while [ "$#" -gt "0" ]
-    do
-        echo "$1" | awk '{
-            if($6=="\"GET" || $6=="\"POST" || $6=="\"HEAD")
-            print $7;
-            }'|sort -u
-        shift
-    done
-}
-
-## This function prints out histogram of sum by source IP addresses
-hist_ip()
-{
-    while [ "$#" -gt "0" ]
-    do
-        adress=$(echo "$1" | awk '{print $1}'  |sort | uniq -c | sort -r) 
-        echo ${adress} | awk '{
-            for(i=1;i<=$NR;i++)
-            {
-                printf $(2*i)" (" $(2*i-1) "): ";
-                for(j=0;j<$(2*i-1);j++)
-                {
-                    printf "#"
-                }
-                print "" 
-            } 
-        }' 
-        shift
-    done
-}
-
-## This function prints out histogram of load
-hist_load()
-{
-    while [ "$#" -gt "0" ]
-    do
-        TIMELOAD=$(echo "$1" | awk '{print $4}' | tr -d "[" | sed 's/\// /' | sed 's/\// /' | sed 's/:/ /g')
-        
-        TIMELOAD=$(echo "$TIMELOAD" | awk '{t = $1; 
-                    $1=$3; 
-                    $3=t;
-                    print;
-                    }')
-
-        TIMELOAD=$(echo "$TIMELOAD" | sed 's/Jan/01/' | sed 's/Feb/02/' | sed 's/Mar/03/' | sed 's/Apr/04/' | sed 's/May/05/' | 
-        sed 's/Jun/06/' | sed 's/Jul/07/' | sed 's/Aug/08/' | sed 's/Sep/09/' | sed 's/Oct/10/' | sed 's/Nov/11/' | sed 's/Dec/12/')
-        TIMELOAD=$(echo "$TIMELOAD" | sed 's/ /-/' | sed 's/ /-/' )
-        echo "$TIMELOAD"
-        shift
-    done
-}
-
-## FIlter for date and time in stdin
-datetimefilter()
-{
-    DATE=$(echo "$2" | awk '{print $1}')
-    TIME=$(echo "$2" | awk '{print $2}')
-    if  [ "$DATE" != "$(echo "$DATE" | grep -E '[12][0-9]{3}-(0?[1-9]|10|11|12)-(0?[1-9]|[12][0-9]|3[01])')" ]; then 
-        (>&2 echo "Invalid date")
-        exit 1
-    fi
-    if  [ "$TIME" != "$(echo "$TIME" | grep -E '([0-9]|0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]')" ]; then
-        (>&2 echo "Invalid time")
-        exit 1
-    fi
-                
-    DATE=$(echo "$DATE" | tr -d '-')
-    TIME=$(echo "$TIME" | tr -d ':')
-
-    if [ "$1" = "-a" ]; then
-        DATETIMEA="$DATE$TIME"
-    else
-        DATETIMEB="$DATE$TIME"
-    fi           
-}
-
-## Filter for date and time in log files
-date_filter()
-{
-    LOGS="$3"
-    DATE=$(echo "$LOGS" | awk '{print $4}' | tr -d '[' | sed 's/\// /' | sed 's/\// /' | sed 's/:/ /' | tr -d ':')
-    DATE=$(echo "$DATE" | awk '{t = $1; 
-                    $1=$3; 
-                    $3=t;
-                    print;
-                    }')
-    DATE=$(echo "$DATE" | sed 's/Jan/01/' | sed 's/Feb/02/' | sed 's/Mar/03/' | sed 's/Apr/04/' | sed 's/May/05/' | sed 's/Jun/06/' |
-                        sed 's/Jul/07/' | sed 's/Aug/08/' | sed 's/Sep/09/' | sed 's/Oct/10/' | sed 's/Nov/11/' | sed 's/Dec/12/')
-    DATE=$(echo "$DATE" | tr -d ' ')
-
-    if [ "$1" = "-a" ];then
-        LOGS=$(echo "$LOGS" | awk '{
-                            if($DATE>$DATETIMEA)
-                            {
-                                LOGS=$DATE
-                            }
-                       }')
-    fi
-
-    #echo "$LOGS"
-    if [ "$1" = "-b" ];then
-        LOGS=$(echo "$LOGS" | awk '{
-                            if($DATE<$DATETIMEB)
-                            {
-                                LOGS=$DATE
-                            }
-                        }')
-    fi
-    
-}
-
-## Filter for ip addresses
-ip_filter()
-{
-    IP="$1"
-    LOGS="$2"
-    LOGS=$(echo "$LOGS" | grep -E "$IP")
-}
-
-## Filter for uri addresses
-uri_filter()
-{
-    URI=$(echo "$1" | awk '{print $1}')
-    LOGS="$2"
-    LOGS=$(echo "$LOGS" | grep -E "$URI")
-}
-
-
-########################################
-################# MAIN #################
-
-if [ "$1" != "list-ip" ] && [ "$1" != "list-hosts" ] && [ "$1" != "list-uri" ] && [ "$1" != "hist-ip" ] && [ "$1" != "hist-load" ] &&
-    [ "$1" != "-a" ] && [ "$1" != "-b" ] && [ "$1" != "-ip" ] && [ "$1" != "-uri" ];then
-    while [ "$#" -gt "0" ]
-    do
-        if [ -f "$1" ]; then
-            if  echo "$1" | grep -Eq '\w*gz\b'
-            then
-                LOGS="$LOGS $(gunzip -c "$1")"
-            else
-                LOGS="$LOGS $(cat "$1")"
-            fi
+        host_name=$(host "$ip" | awk '{print $NF}')
+        if [ "$host_name" = "3(NXDOMAIN)" ] || [ "$host_name" = "2(SERFAIL)" ] 2>/dev/null; then
+            echo "$ip"
+        else
+            echo "$host_name" | awk 'NR==1'
         fi
-        shift
     done
-    echo "$LOGS"
-    exit 0
-fi
+}
 
-case "$1" in
+get_list_uri(){
+    echo "$1" | awk '$7 ~ /(\/.*)/ { print $7}' | sort --unique
+}
+
+get_hist_ip(){
+    echo "$1" | awk '{print $1}' | sort | uniq -c | sort -nrk1 | 
+        awk '{printf $2 " ("$1"): "
+            for(i=0; i<$1; i++) {printf "#"}
+            print ""
+        }'
+}
+
+get_hist_load(){
+    echo "$1" | awk '{print substr($4,2)}' | 
+        awk -F "/" '{
+            printf substr($3,0,4)"-";
+            if($2 == "Jan") "01";
+            else if($2 == "Feb") printf "02";
+            else if($2 == "Mar") printf "03";
+            else if($2 == "Apr") printf "04";
+            else if($2 == "May") printf "05";
+            else if($2 == "Jun") printf "06";
+            else if($2 == "Jul") printf "07";
+            else if($2 == "Aug") printf "08";
+            else if($2 == "Sep") printf "09";
+            else if($2 == "Oct") printf "10";
+            else if($2 == "Nov") printf "11";
+            else if($2 == "Dec") printf "12";
+            print "-"$1"-"substr($3,6,2)"-00"
+        }' | sort | uniq -c |
+            awk '{printf $2 " ("$1"): "
+                for(i=0; i<$1; i++) {printf "#"}
+                print ""
+            }' | sed -e 's/\-/ /3' -e 's/\-/:/3'
+}
+
+date_to_num(){
+    echo "$1" |
+        awk '{
+            gsub("Jan","01",$4);
+            gsub("Feb","02",$4);
+            gsub("Mar","03",$4);
+            gsub("Apr","04",$4);
+            gsub("May","05",$4);
+            gsub("Jun","06",$4);
+            gsub("Jul","07",$4);
+            gsub("Aug","08",$4);
+            gsub("Sep","09",$4);
+            gsub("Oct","10",$4);
+            gsub("Nov","11",$4);
+            gsub("Dec","12",$4);
+            gsub(/\[/, "", $4);
+            $4=substr($4,7,4)substr($4,4,2)substr($4,1,2)substr($4,12,8);
+            gsub(":", "", $4);
+            print
+        }'
+}
+
+num_to_date(){
+    echo "$1" | awk '{
+        month=substr($4,5,2);
+        if(month == "01") tmp="["substr($4,7,2)"/Jan";
+        else if(month == "02") tmp="["substr($4,7,2)"/Feb";
+        else if(month == "03") tmp="["substr($4,7,2)"/Mar";
+        else if(month == "04") tmp="["substr($4,7,2)"/Apr";
+        else if(month == "05") tmp="["substr($4,7,2)"/May";
+        else if(month == "06") tmp="["substr($4,7,2)"/Jun";
+        else if(month == "07") tmp="["substr($4,7,2)"/Jul";
+        else if(month == "08") tmp="["substr($4,7,2)"/Aug";
+        else if(month == "09") tmp="["substr($4,7,2)"/Sep";
+        else if(month == "10") tmp="["substr($4,7,2)"/Oct";
+        else if(month == "11") tmp="["substr($4,7,2)"/Nov";
+        else if(month == "12") tmp="["substr($4,7,2)"/Dec";
+        $4=tmp"/"substr($4,1,4)":"substr($4,9,2)":"substr($4,11,2)":"substr($4,13,2);
+        print
+    }'
+}
+
+
+get_logs_after(){
+    num_to_date "$(date_to_num "$1" | awk -v date_after="$2" '$4 > date_after')"
+}
+
+get_logs_before(){
+    num_to_date "$(date_to_num "$1" | awk -v date_before="$2" '$4 < date_before')"
+}
+
+get_logs_ip(){
+    echo "$1" | awk -v ip_source="$2" '$1 == ip_source'
+}
+
+get_logs_uri(){
+    echo "$1" | awk -v uri_regex="$2" '$7~uri_regex {print}' 2>/dev/null
+}
+
+is_valid_date(){
+    echo "$1" | grep -o -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-2]{1}[0-9]{1}(:[0-6]{1}[0-9]{1}){2}$' 1>/dev/null
+}
+
+
+list_ip=false
+list_hosts=false
+list_uri=false
+hist_ip=false
+hist_load=false
+LOGS=
+
+while [ "$1" != "" ]; do
+    PARAM=$(echo "$1" | awk -F= '{print $1}')
+    case "$PARAM" in
+        
+        # Help command
+        -h|--help)
+            usage
+            exit 0;;
+
+        # Commands
         list-ip)
-            shift
-            command="list-ip"
-            ;;
+            list_ip=true
+            shift;;
         list-hosts)
-            shift
-            command="list-hosts"
-            ;;
+            list_hosts=true
+            shift;;
         list-uri)
-            shift
-            command="list-uri"
-            ;;
+            list_uri=true
+            shift;;
         hist-ip)
-            shift
-            command="hist-ip"
-            ;;
+            hist_ip=true
+            shift;;
         hist-load)
-            shift
-            command="hist-load"
-            ;;
-esac
+            hist_load=true
+            shift;;
 
-########## NO LOGS ##########
-if [ "$#" -eq "0" ] ; then
-    LOGS="$(cat)"
-fi
-
-TIMEATRIGGER=false
-TIMEAERROR=0
-
-TIMEBTRIGGER=false
-TIMEBERROR=0
-
-IPTRIGGER=false
-IPERROR=0
-
-URITRIGGER=false
-URIERROR=0
-
-while [ "$#" -gt "0" ]
-do
-    case "$1" in
+        # Filters
         -a)
-            TIMEATRIGGER=true
-            TIMEAERROR=$TIMEAERROR+1
-            if [ "$TIMEAERROR" = "2" ];then
-                (>&2 echo "Two same date filters!")
+            is_valid_date "$2"
+            is_valid=$?
+            if [ $is_valid -ne 0 ]; then
+                echo "Wrong datetime format! Valid datetime format is YYYY-MM-DD HH:MM:SS"
                 exit 1
             fi
-            datetimefilter "$1" "$2" #check date and time
-            shift 2
-            ;;
+            after_datetime_val=$(echo "$2" | sed -e 's/-//g' -e 's/://g' -e 's/ //g')
+            shift 2;;
         -b)
-            TIMEBTRIGGER=true
-            TIMEBERROR=$TIMEBERROR+1
-            if [ "$TIMEBERROR" = "2" ];then
-                (>&2 echo "Two same date filters!")
-                exit 1
+            is_valid_date "$2"
+            is_valid=$?
+            if [ $is_valid -ne 0 ]; then
+                 echo "Wrong datetime format! Valid datetime format is YYYY-MM-DD HH:MM:SS"
+                 exit 1
             fi
-            datetimefilter "$1" "$2" #check date and time
-            shift 2
-            ;;
+            before_datetime_val=$(echo "$2" | sed -e 's/-//g' -e 's/://g' -e 's/ //g')
+            shift 2;;
         -ip)
-            IPADDR="$2"
-            IPTRIGGER=true
-            IPERROR=$IPERROR+1
-            if [ "$IPERROR" = "2" ];then
-                (>&2 echo "Two ip filters!")
+            ip_filter_val="$2"
+            check_ip="$(echo "$ip_filter_val" | grep -o -E '(^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$)|(([A-Fa-f0-9]{0,4}\:){1,7}[A-Fa-f0-9]{0,4})')"
+
+            if [ "$check_ip" = "" ]; then
+                echo "Wrong format of IPv4 or IPv6!"
                 exit 1
             fi
-            if [ "$IPADDR" = "$(echo "$IPADDR" | grep -o -E '^([A-Fa-f0-9]{0,4}\:){1,7}[A-Fa-f0-9]{0,4}')" ] ||
-            [ "$IPADDR" = "$(echo "$IPADDR" | grep -o -E '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')" ]; then
-                shift 2 
-            else
-                (>&2echo "Wrong IP!")
-                exit 1
-            fi
-            ;;
+            shift 2;;
         -uri)
-            URI="$2"
-            URITRIGGER=true
-            URIERROR=$URIERROR+1
-            if [ "$URIERROR" = "2" ]; then
-                (>&2 echo "Two uri filters!")
-                exit 1
-            fi
-            shift 2
-            ;;
+            uri_filter_val="$2"
+            shift 2;;
+
+        # Log files
+        *.gz)
+            LOGS="$LOGS
+$(gunzip -c "$(echo "$1" | awk '{print $1}')")"
+            shift;;
+        *.log*)
+            LOGS="$LOGS
+$(cat "$(echo "$1" | awk '{print $1}')")"
+            shift;;
+
+        # Invalid options
         *)
-            if [ -f "$1" ]; then
-                    if  echo "$1" | grep -Eq '\w*gz\b'
-                    then
-                        LOGS="$LOGS $(gunzip -c "$1")"
-                    else
-                        LOGS="$LOGS $(cat "$1")"
-                    fi
-                    shift
-            else
-                if [ "$1" != "list-ip" ] && [ "$1" != "list-hosts" ] && [ "$1" != "list-uri" ] && [ "$1" != "hist-ip" ] && [ "$1" != "hist-load" ];then
-                    (>&2 echo "Wrong filter")
-                    exit 1
-                fi
-                shift
-            fi
-            ;;
+            echo "./wana.sh: invalid option -- '$1'"
+            echo "Try './wana.sh --help' for more information."
+            exit 1
     esac
 done
 
-case "$1" in
-        list-ip)
-            shift
-            command="list-ip"
-            ;;
-        list-hosts)
-            shift
-            command="list-hosts"
-            ;;
-        list-uri)
-            shift
-            command="list-uri"
-            ;;
-        hist-ip)
-            shift
-            command="hist-ip"
-            ;;
-        hist-load)
-            shift
-            command="hist-load"
-            ;;
-esac
-
-########## TRIGGERS FOR FILTERS ##########
-if [ "$TIMEATRIGGER" = true ]; then
-    date_filter "-a" "$DATETIMEA" "$LOGS"
+if [ "$LOGS" = "" ]; then
+    while read -r line
+    do
+        LOGS="$LOGS
+$line"
+    done
 fi
 
-if [ "$TIMEBTRIGGER" = true ]; then
-    date_filter "-b" "$DATETIMEB" "$LOGS"
-fi
+LOGS="$(echo "$LOGS" | awk 'NR>1')"
 
-if [ "$IPTRIGGER" = true ]; then
-    ip_filter "$IP" "$LOGS"
-fi
 
-if [ "$URITRIGGER" = true ]; then 
-    uri_filter "$URI" "$LOGS" 
+if [ -n "$after_datetime_val" ]; then
+    LOGS="$(get_logs_after "$LOGS" "$after_datetime_val")"
+fi
+if [ -n "$before_datetime_val" ]; then
+    LOGS="$(get_logs_before "$LOGS" "$before_datetime_val")"
+fi
+if [ -n "$ip_filter_val" ]; then
+    LOGS="$(get_logs_ip "$LOGS" "$ip_filter_val")"
+fi
+if [ -n "$uri_filter_val" ]; then
+    LOGS="$(get_logs_uri "$LOGS" "$uri_filter_val")"
 fi
 
 
-########## COMMANDS ##########
-case "$command" in
-    list-ip)
-        list_ip "$LOGS" |sort -u
-        ;;
-    list-hosts)
-        list_hosts "$LOGS" |sort -u
-        ;;
-    list-uri)
-        list_uri "$LOGS" |sort -u
-        ;;
-    hist-ip)
-        hist_ip "$LOGS"
-        ;;
-    hist-load)
-        hist_load "$LOGS"
-        ;;    
-esac
+if [ $list_ip = true ]; then
+    LOGS="$(get_list_ip "$LOGS")"
+elif [ $list_hosts = true ]; then
+    LOGS="$(get_list_hosts "$LOGS")"
+elif [ $list_uri = true ]; then
+    LOGS="$(get_list_uri "$LOGS")"
+elif [ $hist_ip = true ]; then
+    LOGS="$(get_hist_ip "$LOGS")"
+elif [ $hist_load = true ]; then
+    LOGS="$(get_hist_load "$LOGS")"
+fi
 
+echo "$LOGS"
 exit 0
-
