@@ -18,10 +18,10 @@
 WANA=./wana.sh
 
 # adresar s log soubory. Pokud jsou logy v adresari, pouzij napr ./logs/
-LOGS_DIR=./
+LOGS_DIR=./logs/
 
 # adresar s testy
-TESTS_DIR=./tests
+TESTS_DIR=./tests/
 
 # pouzity interpret (sh, bash, ..)
 SHELL=sh
